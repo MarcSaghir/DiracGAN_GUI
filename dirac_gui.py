@@ -15,6 +15,9 @@ from diracgan.gans import (
     GAN_InstNoise,
     NSGAN_GradPenalty,
 )
+
+from new_gans import LSGAN, LeCamGAN
+
 from diracgan.simulate import trajectory_altgd, trajectory_simgd
 
 # ablauf:
@@ -40,6 +43,8 @@ class DiracGANPlot:
             "GAN_GradPenalty_reg": 0.3,
             "GAN_Consensus_reg": 1.0,
             "NSGAN_GradPenalty_reg": 0.3,
+            "LeCamGAN_lambda": -0.3,  # default value for LeCamGAN
+            "LeCamGAN_alpha":0.1
         }
         self.GANS = [
             GAN(),
@@ -50,6 +55,8 @@ class DiracGANPlot:
             GAN_GradPenalty(self.GAN_params["GAN_GradPenalty_reg"]),
             GAN_Consensus(self.GAN_params["GAN_Consensus_reg"]),
             NSGAN_GradPenalty(self.GAN_params["NSGAN_GradPenalty_reg"]),
+            LSGAN(),
+            LeCamGAN(self.GAN_params["LeCamGAN_lambda"], self.GAN_params["LeCamGAN_alpha"])
         ]
 
         # learning rate
@@ -61,8 +68,8 @@ class DiracGANPlot:
         # iterations
         self.n_steps = tk.IntVar(value=500)
         # steps per update
-        self.gsteps = tk.DoubleVar(value=1)
-        self.dsteps = tk.DoubleVar(value=1)
+        self.gsteps = tk.IntVar(value=1)
+        self.dsteps = tk.IntVar(value=1)
 
         self.theta_s = np.linspace(-2, 2.0, 10)
         self.psi_s = np.linspace(-2, 2, 10)
@@ -71,6 +78,13 @@ class DiracGANPlot:
         self.grad_descent = "simultaneous"
 
         self.root = root
+
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        # Set window size to screen size
+        root.geometry(f"{screen_width}x{screen_height}")
+
         self.root.title("DiracGAN Convergence Plotter")
 
         # Create a frame for the plot
@@ -82,7 +96,7 @@ class DiracGANPlot:
         self.fig, self.axs = plt.subplots(
             2,
             n_cols,
-            figsize=(4 * n_cols, 6),
+            figsize=(4 * n_cols, 5),
             sharex=True,
             sharey=True,
             layout="constrained",
@@ -100,8 +114,9 @@ class DiracGANPlot:
             label="Start Theta",
             resolution=0.01,
             variable=self.theta0,
+            length=100
         )
-        self.start_theta_slider.pack(fill="x", expand=True)
+        self.start_theta_slider.pack(fill="x", expand=False)
 
         self.start_psi_slider = tk.Scale(
             root,
@@ -172,34 +187,83 @@ class DiracGANPlot:
         self.animate_button = ttk.Button(
             root, text="Start Animation", command=self.start_animation
         )
-        self.animate_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.animate_button.pack(side=tk.LEFT, padx=6, pady=5)
         self.end_animation_button = ttk.Button(
             root, text="Stop Animation", command=self.stop_animation
         )
-        self.end_animation_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.end_animation_button.pack(side=tk.LEFT, padx=6, pady=5)
         self.continue_animation_button = ttk.Button(
             root, text="Resume Animation", command=self.continue_animation
         )
-        self.continue_animation_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.continue_animation_button.pack(side=tk.LEFT, padx=6, pady=5)
 
         # Button to update the plot
         self.apply_button = ttk.Button(root, text="Apply", command=self.apply_changes)
-        self.apply_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.apply_button.pack(side=tk.LEFT, padx=6, pady=5)
         self.toggle_button = ttk.Button(
             root,
             text="Start Trajectory",
             command=self.toggle_animation,
             state="disabled",
         )
-        self.toggle_button.pack(side=tk.LEFT, padx=10, pady=5)
-        self.next_step_button = ttk.Button(
-            root, text="Next Step", command=..., state="disabled"
-        )
-        self.next_step_button.pack(side=tk.LEFT, padx=10, pady=5)
-        self.refresh_button = ttk.Button(
-            root, text="Previous Step", command=..., state="disabled"
-        )
-        self.refresh_button.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        # -------- number fields --------
+
+        self.lecam_lambda_entry = ttk.Entry(root, width=6)
+        self.lecam_lambda_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.lecam_lambda_button = ttk.Button(root, text="LeCam Reg", command=self.get_lecam_lambda)
+        self.lecam_lambda_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.lecam_alpha_entry = ttk.Entry(root, width=6)
+        self.lecam_alpha_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.lecam_alpha_button = ttk.Button(root, text="LeCam Anchor", command=self.get_lecam_alpha)
+        self.lecam_alpha_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+
+        self.wgan_clip_entry = ttk.Entry(root, width=6)
+        self.wgan_clip_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.wgan_clip_button = ttk.Button(root, text="WGAN Clip", command=self.get_wgan_clip)
+        self.wgan_clip_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+
+        self.wgan_gp_reg_entry = ttk.Entry(root, width=6)
+        self.wgan_gp_reg_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.wgan_gp_reg_button = ttk.Button(root, text="WGANGP Reg", command=self.get_wgan_gp_reg)
+        self.wgan_gp_reg_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.wgan_gp_target_entry = ttk.Entry(root, width=6)
+        self.wgan_gp_target_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.wgan_gp_target_button = ttk.Button(root, text="WGANGP Target", command=self.get_wgan_gp_target)
+        self.wgan_gp_target_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.gan_instnoise_std_entry = ttk.Entry(root, width=6)
+        self.gan_instnoise_std_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.gan_instnoise_std_button = ttk.Button(root, text="InstNoise Std", command=self.get_gan_instnoise_std)
+        self.gan_instnoise_std_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.gan_gradpenalty_reg_entry = ttk.Entry(root, width=6)
+        self.gan_gradpenalty_reg_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.gan_gradpenalty_reg_button = ttk.Button(root, text="GradPen Reg", command=self.get_gan_gradpenalty_reg)
+        self.gan_gradpenalty_reg_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.gan_consensus_reg_entry = ttk.Entry(root, width=6)
+        self.gan_consensus_reg_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.gan_consensus_reg_button = ttk.Button(root, text="Consensus Reg", command=self.get_gan_consensus_reg)
+        self.gan_consensus_reg_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.nsgan_gradpenalty_reg_entry = ttk.Entry(root, width=6)
+        self.nsgan_gradpenalty_reg_entry.pack(side=tk.LEFT, padx=6, pady=6)
+        self.nsgan_gradpenalty_reg_button = ttk.Button(root, text="NSGAN GradPen Reg", command=self.get_nsgan_gradpenalty_reg)
+        self.nsgan_gradpenalty_reg_button.pack(side=tk.LEFT, padx=6, pady=6)
+
+        self.check_gd = tk.BooleanVar()
+        self.gd_checkbox = ttk.Checkbutton(root, text="Enable feature", variable=self.check_gd)
+        self.gd_checkbox.pack(padx=5, pady=5)
+
+        # Button to read checkbox state
+        self.button = ttk.Button(root, text="Alternating", command=self.set_gd)
+        self.button.pack(padx=5, pady=5)
+
 
         # self.grad_descent_combobox =
         # ttk.Combobox(root, values=["simultaneous", "alternating"],
@@ -209,6 +273,83 @@ class DiracGANPlot:
         # Initial plot
         self.refresh_plot()
         self.update_plot()
+
+    def set_gd(self):
+        if self.check_gd.get():
+            self.set_gradient_descent("alternating")
+        else:
+            self.set_gradient_descent("simultaneous")
+        #self.apply_changes()
+
+
+    def get_lecam_lambda(self):
+        try:
+            value = float(self.lecam_lambda_entry.get())
+            self.update_GAN_param("LeCamGAN_lambda", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    def get_lecam_alpha(self):
+        try:
+            value = float(self.lecam_alpha_entry.get())
+            self.update_GAN_param("LeCamGAN_alpha", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    def get_wgan_clip(self):
+        try:
+            value = float(self.wgan_clip_entry.get())
+            self.update_GAN_param("WGAN_clip", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    def get_wgan_gp_reg(self):
+        try:
+            value = float(self.wgan_gp_reg_entry.get())
+            self.update_GAN_param("WGAN_GP_reg", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    def get_wgan_gp_target(self):
+        try:
+            value = float(self.wgan_gp_target_entry.get())
+            self.update_GAN_param("WGAN_GP_target", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+
+    def get_gan_instnoise_std(self):
+        try:
+            value = float(self.gan_instnoise_std_entry.get())
+            self.update_GAN_param("GAN_InstNoise_std", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    def get_gan_gradpenalty_reg(self):
+        try:
+            value = float(self.gan_gradpenalty_reg_entry.get())
+            self.update_GAN_param("GAN_GradPenalty_reg", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+
+    def get_gan_consensus_reg(self):
+        try:
+            value = float(self.gan_consensus_reg_entry.get())
+            self.update_GAN_param("GAN_Consensus_reg", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+
+    def get_nsgan_gradpenalty_reg(self):
+        try:
+            value = float(self.nsgan_gradpenalty_reg_entry.get())
+            self.update_GAN_param("NSGAN_GradPenalty_reg", value)
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+    
+
 
     def toggle_animation(self):
         if not self.running:
@@ -222,8 +363,8 @@ class DiracGANPlot:
 
     def activate_buttons(self):
         self.toggle_button.config(state="normal")
-        self.next_step_button.config(state="normal")
-        self.refresh_button.config(state="normal")
+        #self.next_step_button.config(state="normal")
+        #self.refresh_button.config(state="normal")
 
     def apply_changes(self):
         self.activate_buttons()
@@ -240,6 +381,8 @@ class DiracGANPlot:
             GAN_GradPenalty(self.GAN_params["GAN_GradPenalty_reg"]),
             GAN_Consensus(self.GAN_params["GAN_Consensus_reg"]),
             NSGAN_GradPenalty(self.GAN_params["NSGAN_GradPenalty_reg"]),
+            LSGAN(),
+            LeCamGAN(self.GAN_params["LeCamGAN_lambda"], self.GAN_params["LeCamGAN_alpha"])
         ]
         self.init_plot_values()
         self.step = 0
@@ -326,7 +469,7 @@ class DiracGANPlot:
 
             # Plot the quiver
             ax.quiver(X, Y, U, V, color="#3b4252")
-            ax.set_title("Quiver Plot")
+            ax.set_title(self.GANS[i].__class__.__name__)
             ax.set_aspect("equal")
 
             psis, thetas = self.trajectories[i]
