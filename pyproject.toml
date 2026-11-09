@@ -1,7 +1,7 @@
 [project]
 name = "diracgan-gui"
 version = "0.1.0"
-description = "Add your description here"
+description = "Interactive DiracGAN explorer for GAN training dynamics"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
